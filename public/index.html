@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Movie Share</title>
+</head>
+<link rel="stylesheet" href="style.css">
+<body>
+    <div class="container">
+    <h1>Movie Share</h1>
+
+    <h1>⚡ QuickShare</h1>
+
+    <div id="connectionStatus">
+        ❌ Not Connected
+    </div>
+
+    <div class="card">
+
+        <input id="room" placeholder="Enter Room ID" />
+
+        <button id="join">Join Room</button>
+
+    </div>
+
+    <div class="card">
+
+        <input type="file" id="file" />
+
+    </div>
+
+    <div class="card">
+
+        <div id="status">Waiting...</div>
+
+        <progress id="progressBar" value="0" max="100"></progress>
+
+    </div>
+
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="https://unpkg.com/simple-peer@9.11.1/simplepeer.min.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>
