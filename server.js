@@ -6,7 +6,11 @@ const app = express();
 
 const server = http.createServer(app);
 
-const io = new Server(server);
+const io = new Server(server, {
+    cors: {
+        origin: "*"
+    }
+});
 
 app.use(express.static("public"));
 
@@ -33,7 +37,7 @@ io.on("connection", (socket) => {
     
         console.log(msg);
     
-        socket.broadcast.emit("test-message", msg);
+        socket.to(roomId).emit("test-message", msg);
     
     });
 });

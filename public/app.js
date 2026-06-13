@@ -76,11 +76,12 @@ async function sendFileInChunks(peer, file) {
 
 const statusDiv = document.getElementById("status");
 
+const progressBar = document.getElementById("progressBar");
+
+
 statusDiv.textContent = "Waiting for file...";
 connectionStatus.textContent = "❌ Not Connected";
 progressBar.value = 0;
-
-const progressBar = document.getElementById("progressBar");
 
 async function readChunk(file, start, end) {
   return new Promise((resolve, reject) => {
