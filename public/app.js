@@ -1,4 +1,6 @@
-const socket = io();
+const socket = io({
+  transports: ["websocket"]
+});
 
 const roomInput = document.getElementById("room");
 const joinBtn = document.getElementById("join");
