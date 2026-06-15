@@ -14,7 +14,7 @@ progressBar.value = 0;
 acceptBtn.style.display = "none";
 
 let peer = null;
-let peerDestroyed = true; // start as true — no peer yet
+let peerDestroyed = true;
 let roomId;
 
 // --- Receive state ---
@@ -217,7 +217,6 @@ function setupDataHandler(peer) {
 // ─── Peer factory ─────────────────────────────────────────────────────────────
 
 function createPeer(initiator) {
-  // Always destroy any existing peer before making a new one
   destroyPeer();
   peerDestroyed = false;
 
@@ -226,22 +225,26 @@ function createPeer(initiator) {
     trickle: false,
     config: {
       iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },
-        { urls: "stun:stun1.l.google.com:19302" },
+        { urls: "stun:stun.relay.metered.ca:80" },
         {
-          urls: "turn:openrelay.metered.ca:80",
-          username: "openrelayproject",
-          credential: "openrelayproject",
+          urls: "turn:global.relay.metered.ca:80",
+          username: "cc0288dfa1c46de5e3f7e59c",
+          credential: "ZrRCBpFN+WNHje8r",
         },
         {
-          urls: "turn:openrelay.metered.ca:443",
-          username: "openrelayproject",
-          credential: "openrelayproject",
+          urls: "turn:global.relay.metered.ca:80?transport=tcp",
+          username: "cc0288dfa1c46de5e3f7e59c",
+          credential: "ZrRCBpFN+WNHje8r",
         },
         {
-          urls: "turn:openrelay.metered.ca:443?transport=tcp",
-          username: "openrelayproject",
-          credential: "openrelayproject",
+          urls: "turn:global.relay.metered.ca:443",
+          username: "cc0288dfa1c46de5e3f7e59c",
+          credential: "ZrRCBpFN+WNHje8r",
+        },
+        {
+          urls: "turns:global.relay.metered.ca:443?transport=tcp",
+          username: "cc0288dfa1c46de5e3f7e59c",
+          credential: "ZrRCBpFN+WNHje8r",
         },
       ],
     },
@@ -277,25 +280,22 @@ function createPeer(initiator) {
 joinBtn.onclick = () => {
   roomId = roomInput.value.trim();
   if (!roomId) return;
-  // Destroy any leftover peer from a previous attempt before joining
   destroyPeer();
   socket.emit("join-room", roomId);
   connectionStatus.textContent = "⏳ Waiting for peer...";
 };
 
 socket.on("user-joined", () => {
-  console.log("user-joined received — creating initiator peer");
+  console.log("user-joined — creating initiator peer");
   peer = createPeer(true);
 });
 
 socket.on("signal", (data) => {
-  // If already connected, ignore stale signals completely
   if (peer && peer.connected) {
     console.log("Ignored signal — already connected");
     return;
   }
 
-  // If no peer exists yet, create the receiver peer
   if (!peer || peerDestroyed) {
     peer = createPeer(false);
   }
