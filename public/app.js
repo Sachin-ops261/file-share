@@ -14,6 +14,7 @@ progressBar.value = 0;
 acceptBtn.style.display = "none";
 
 let peer;
+let peerDestroyed = false; // guard flag
 let roomId;
 
 // --- Receive state ---
@@ -33,9 +34,9 @@ console.log("app.js loaded");
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 async function waitForBuffer(peer) {
-  const LIMIT = 512 * 1024; // 512 KB — tighter back-pressure
+  const LIMIT = 512 * 1024;
   while (peer._channel && peer._channel.bufferedAmount > LIMIT) {
-    await new Promise((resolve) => setTimeout(resolve, 10)); // poll every 10ms
+    await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
 
@@ -51,27 +52,35 @@ async function readChunk(file, start, end) {
 // ─── Send ────────────────────────────────────────────────────────────────────
 
 async function sendFileInChunks(peer, file) {
-  const CHUNK_SIZE = 256 * 1024; // 256 KB — 4x bigger chunks
+  const CHUNK_SIZE = 256 * 1024;
   let offset = 0;
 
-  // Pre-read the first chunk before the loop starts
   let nextChunk = await readChunk(file, 0, Math.min(CHUNK_SIZE, file.size));
 
   while (offset < file.size) {
+    // Stop if peer was destroyed mid-transfer
+    if (peerDestroyed) {
+      statusDiv.textContent = "❌ Transfer cancelled — peer disconnected.";
+      return;
+    }
+
     const chunk = nextChunk;
     const nextOffset = offset + chunk.byteLength;
 
-    // Start reading the next chunk immediately (pipelining — read & send overlap)
     const nextRead =
       nextOffset < file.size
         ? readChunk(file, nextOffset, Math.min(nextOffset + CHUNK_SIZE, file.size))
         : Promise.resolve(null);
 
     await waitForBuffer(peer);
+
+    if (peerDestroyed) {
+      statusDiv.textContent = "❌ Transfer cancelled — peer disconnected.";
+      return;
+    }
+
     peer.send(chunk);
     offset = nextOffset;
-
-    // By the time we've waited for the buffer and sent, next chunk is likely ready
     nextChunk = await nextRead;
 
     const elapsedSeconds = (Date.now() - sendStartTime) / 1000;
@@ -87,10 +96,12 @@ async function sendFileInChunks(peer, file) {
     progressBar.value = percent;
   }
 
-  peer.send(JSON.stringify({ type: "file-end" }));
-  console.log("Finished sending");
-  statusDiv.textContent = "File Sent ✅";
-  progressBar.value = 100;
+  if (!peerDestroyed) {
+    peer.send(JSON.stringify({ type: "file-end" }));
+    statusDiv.textContent = "File Sent ✅";
+    progressBar.value = 100;
+    console.log("Finished sending");
+  }
 }
 
 // ─── Receive ─────────────────────────────────────────────────────────────────
@@ -103,7 +114,6 @@ acceptBtn.addEventListener("click", async () => {
     const fileHandle = await window.showSaveFilePicker({ suggestedName: expectedFileName });
     fileWritableStream = await fileHandle.createWritable();
 
-    // Flush chunks that arrived before the user clicked
     for (const chunk of pendingChunks) {
       await fileWritableStream.write(chunk);
     }
@@ -138,7 +148,6 @@ function setupDataHandler(peer) {
         transferEnded = false;
 
         console.log(`Incoming: ${message.name} (${(message.size / 1024 / 1024).toFixed(1)} MB)`);
-
         acceptBtn.textContent = `💾 Accept & Save "${message.name}"`;
         acceptBtn.style.display = "inline-block";
         statusDiv.textContent = `Incoming file: ${message.name}`;
@@ -198,13 +207,31 @@ function setupDataHandler(peer) {
 // ─── Peer factory ─────────────────────────────────────────────────────────────
 
 function createPeer(initiator) {
+  peerDestroyed = false;
+
   const p = new SimplePeer({
     initiator,
-    trickle: true, // faster connection establishment
+    trickle: false, // back to false — trickle was causing the SDP state errors
     config: {
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
         { urls: "stun:stun1.l.google.com:19302" },
+        // Free TURN server from metered.ca — handles connections that STUN alone can't
+        {
+          urls: "turn:openrelay.metered.ca:80",
+          username: "openrelayproject",
+          credential: "openrelayproject",
+        },
+        {
+          urls: "turn:openrelay.metered.ca:443",
+          username: "openrelayproject",
+          credential: "openrelayproject",
+        },
+        {
+          urls: "turn:openrelay.metered.ca:443?transport=tcp",
+          username: "openrelayproject",
+          credential: "openrelayproject",
+        },
       ],
     },
   });
@@ -220,11 +247,13 @@ function createPeer(initiator) {
 
   p.on("close", () => {
     console.log("Peer disconnected");
+    peerDestroyed = true;
     connectionStatus.textContent = "❌ Peer disconnected";
   });
 
   p.on("error", (err) => {
     console.error(err);
+    peerDestroyed = true;
     connectionStatus.textContent = "⚠️ Connection error";
   });
 
@@ -245,8 +274,15 @@ socket.on("user-joined", () => {
 });
 
 socket.on("signal", (data) => {
-  if (!peer) peer = createPeer(false);
-  peer.signal(data);
+  // Guard: don't signal a destroyed peer — create a fresh one instead
+  if (!peer || peerDestroyed) {
+    peer = createPeer(false);
+  }
+  try {
+    peer.signal(data);
+  } catch (err) {
+    console.warn("Ignored stale signal:", err.message);
+  }
 });
 
 // ─── File input ───────────────────────────────────────────────────────────────
