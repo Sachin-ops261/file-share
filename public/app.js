@@ -13,8 +13,8 @@ statusDiv.textContent = "Waiting for file...";
 progressBar.value = 0;
 acceptBtn.style.display = "none";
 
-let peer;
-let peerDestroyed = false; // guard flag
+let peer = null;
+let peerDestroyed = true; // start as true — no peer yet
 let roomId;
 
 // --- Receive state ---
@@ -49,6 +49,17 @@ async function readChunk(file, start, end) {
   });
 }
 
+// ─── Destroy existing peer safely ────────────────────────────────────────────
+
+function destroyPeer() {
+  if (peer && !peerDestroyed) {
+    peerDestroyed = true;
+    try { peer.destroy(); } catch (_) {}
+  }
+  peer = null;
+  peerDestroyed = true;
+}
+
 // ─── Send ────────────────────────────────────────────────────────────────────
 
 async function sendFileInChunks(peer, file) {
@@ -58,7 +69,6 @@ async function sendFileInChunks(peer, file) {
   let nextChunk = await readChunk(file, 0, Math.min(CHUNK_SIZE, file.size));
 
   while (offset < file.size) {
-    // Stop if peer was destroyed mid-transfer
     if (peerDestroyed) {
       statusDiv.textContent = "❌ Transfer cancelled — peer disconnected.";
       return;
@@ -207,16 +217,17 @@ function setupDataHandler(peer) {
 // ─── Peer factory ─────────────────────────────────────────────────────────────
 
 function createPeer(initiator) {
+  // Always destroy any existing peer before making a new one
+  destroyPeer();
   peerDestroyed = false;
 
   const p = new SimplePeer({
     initiator,
-    trickle: false, // back to false — trickle was causing the SDP state errors
+    trickle: false,
     config: {
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
         { urls: "stun:stun1.l.google.com:19302" },
-        // Free TURN server from metered.ca — handles connections that STUN alone can't
         {
           urls: "turn:openrelay.metered.ca:80",
           username: "openrelayproject",
@@ -266,22 +277,33 @@ function createPeer(initiator) {
 joinBtn.onclick = () => {
   roomId = roomInput.value.trim();
   if (!roomId) return;
+  // Destroy any leftover peer from a previous attempt before joining
+  destroyPeer();
   socket.emit("join-room", roomId);
+  connectionStatus.textContent = "⏳ Waiting for peer...";
 };
 
 socket.on("user-joined", () => {
+  console.log("user-joined received — creating initiator peer");
   peer = createPeer(true);
 });
 
 socket.on("signal", (data) => {
-  // Guard: don't signal a destroyed peer — create a fresh one instead
+  // If already connected, ignore stale signals completely
+  if (peer && peer.connected) {
+    console.log("Ignored signal — already connected");
+    return;
+  }
+
+  // If no peer exists yet, create the receiver peer
   if (!peer || peerDestroyed) {
     peer = createPeer(false);
   }
+
   try {
     peer.signal(data);
   } catch (err) {
-    console.warn("Ignored stale signal:", err.message);
+    console.warn("Ignored bad signal:", err.message);
   }
 });
 
